@@ -98,6 +98,12 @@ El revisor también se equivoca, así que confirma cada hallazgo mirando el íte
 | Decisiones equivocadas con un contrato claro | Nivel insuficiente | Relanza el lote un nivel más arriba o con más esfuerzo. |
 | Falla un lote aislado y el resto sale bien | Ruido | Rehazlo una vez, igual. |
 
+**Corrige solo lo que levantó sospecha.** La tabla es para fallas de fondo que tocan varios ítems. Hay dos casos en que no se relanza el lote:
+- La falla es de forma y se arregla sin modelo, por ejemplo con un comando que borra una fila inventada o cambia un separador. Arréglala así.
+- La falla toca un solo ítem. Corrígelo tú.
+
+Lo que pasó la revisión no se vuelve a recorrer: rehacerlo no agrega evidencia y abre la puerta a errores nuevos.
+
 Cada lote tiene como máximo un reintento: rehacerlo, desglosarlo o subirlo de nivel. Si vuelve a fallar, lo resuelves tú o el insignia, o queda abierto en el reporte. No iteres en círculo.
 
 ## 5. Reporta
@@ -105,7 +111,7 @@ Cada lote tiene como máximo un reintento: rehacerlo, desglosarlo o subirlo de n
 Escribe corto y en el idioma del usuario:
 - El plan ejecutado: cuántos lotes, qué nivel tuvo cada grupo y quién revisó, en una línea o una tabla chica.
 - Lo que no cuadró y qué hiciste: desglose, subida de nivel o contrato corregido.
-- Lo que quedó abierto.
+- Lo que quedó abierto, incluida la parte que solo pasó la primera vista y que ningún modelo revisó. Eso también es parte del resultado.
 
 No narres agente por agente ni pegues sus reportes.
 
