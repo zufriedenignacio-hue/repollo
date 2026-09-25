@@ -49,6 +49,7 @@ Tamaño del lote:
 - **El piso lo pone el arranque.** Cada agente parte de cero y carga decenas de miles de tokens de contexto propio antes de trabajar. Arrancar un agente, sin trabajo, cuesta del orden de US$0,07 con sonnet y US$0,30 con fable (medido en Claude Code 2.1.282, a precios de API). Si el lote es tan chico que el arranque pesa más que el trabajo, junta lotes o usa un script.
 - **Lanza un lote piloto.** Antes de lanzar 30 lotes, lanza 1 y revísalo. Si sale bien, lanza el resto con el mismo contrato. Si sale mal, corrige el contrato o el nivel antes de multiplicar el error por 30.
 - **Trabaja por oleadas cuando hay dependencias.** Si el paso siguiente necesita el resultado del anterior (abrir un nivel para llegar al siguiente), termina y revisa cada oleada antes de lanzar la otra. Dentro de una oleada, los lotes van en paralelo en un mismo mensaje. Si lo que sigue depende de la oleada, lánzala en primer plano (`run_in_background: false`).
+- **Respeta el tope de simultaneidad.** Claude Code corre como máximo 20 subagentes a la vez, contando los que ya estén corriendo. El tope se cambia con `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`. Los que pasan del tope se rechazan y no se reintentan solos. Lanza en tandas que no pasen el tope y lanza la tanda siguiente cuando termine la anterior. En primer plano no hay rechazo, pero corren de a 10.
 - **Dos agentes en paralelo no pueden tocar los mismos archivos.** Reparte los lotes por archivo o carpeta.
 
 ## 3. Revisa como caja negra
@@ -57,7 +58,7 @@ El revisor recibe el contrato y la salida (o dónde encontrarla), nada más. No 
 
 Revisa en dos capas, primero la barata:
 1. **Primera vista (mecánica).** Correspondencia uno a uno entre entrada y salida, conteos, formato y PENDIENTES. Hazla tú o con un script. Casi no cuesta y atrapa lo grueso: ítems omitidos, salidas truncadas o ítems inventados.
-2. **Juicio.** Solo sobre lo que marcó la primera vista, más una muestra del resto cuando el contrato pedía juicio. Aquí entra el agente `revisor`.
+2. **Juicio.** Solo sobre lo que marcó la primera vista, más una muestra del resto siempre que el contenido no se pueda validar con un script. Eso pasa casi siempre que la salida la produjo un modelo, porque una respuesta genérica tiene el formato correcto y pasa cualquier conteo. Aquí entra el agente `revisor`.
 
 El modelo del revisor depende de lo que tiene que juzgar, no del nivel de quien produjo:
 - Los conteos y el formato los revisa un script.
@@ -110,13 +111,13 @@ No narres agente por agente ni pegues sus reportes.
 
 ## Agentes
 
-Los niveles son definiciones de agente porque, en Claude Code, el esfuerzo de un subagente solo se fija en su definición. El parámetro `model` de la llamada cambia el modelo, no el esfuerzo. Las definiciones (`bulldozer`, `operario`, `insignia` y `revisor`) están en la carpeta `agents/` de esta skill. Para que la herramienta Agent las liste, tienen que estar en `~/.claude/agents/` o en `.claude/agents/` del proyecto, y se cargan al iniciar la sesión. Si no aparecen, ofrécele al usuario copiarlas desde la carpeta `agents/` de esta skill a `~/.claude/agents/`; quedan activas desde la sesión siguiente. Mientras tanto, usa `general-purpose` con el parámetro `model` (el esfuerzo queda en el valor por defecto) y agrega al brief del revisor las reglas de `agents/revisor.md`.
+Los niveles son definiciones de agente porque, en Claude Code, el esfuerzo de un subagente solo se fija en su definición. El parámetro `model` de la llamada cambia el modelo, no el esfuerzo. Las definiciones (`bulldozer`, `operario`, `insignia` y `revisor`) están en la carpeta `agents/` de esta skill. Para que la herramienta Agent las liste, tienen que estar en `~/.claude/agents/` o en `.claude/agents/` del proyecto. Una sesión nueva las carga siempre. Una sesión que ya está corriendo puede tardar en detectarlas. Si no aparecen, ofrécele al usuario copiarlas desde la carpeta `agents/` de esta skill a `~/.claude/agents/`; quedan activas en la sesión siguiente. Mientras tanto, usa `general-purpose` con el parámetro `model` (el esfuerzo queda en el valor por defecto) y agrega al brief del revisor las reglas de `agents/revisor.md`.
 
 ## Ejemplo
 
 Hay un árbol de carpetas por niveles: hay que procesar un nivel para llegar al siguiente, y cada nivel tiene más carpetas que el anterior.
 - Si procesar una carpeta es una regla fija (mover o renombrar), el nivel es Script y no hacen falta agentes.
-- Si hay que leer y decidir con una regla explícita, van bulldozers por oleadas, una por nivel, con lotes de 4 carpetas: 5 bulldozers para el nivel de 20 carpetas y 30 para el de 120. La primera oleada parte con un lote piloto.
+- Si hay que leer y decidir con una regla explícita, van bulldozers por oleadas, una por nivel, con lotes de 4 carpetas: 5 bulldozers para el nivel de 20 carpetas y 30, en dos tandas, para el de 120. La primera oleada parte con un lote piloto.
 - Contrato de un lote: "Entrada: estas 4 rutas. Operación: … Salida: una fila por carpeta con ruta|decisión|motivo. Aceptación: 4 filas con rutas idénticas a la entrada."
 - La primera vista (conteos y rutas) la hace un script sobre todos los lotes. El `revisor` mira solo los lotes marcados y una muestra del resto.
 - La alternativa es un insignia con esfuerzo máximo que recorre todo el árbol. Es más lento y más caro por token, pero no necesita revisión con modelo. Conviene cuando las decisiones dependen de ver varias carpetas a la vez, que es justo lo que un bulldozer no ve.
