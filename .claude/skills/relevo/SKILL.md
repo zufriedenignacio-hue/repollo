@@ -12,7 +12,7 @@ Cada pieza de trabajo va al modelo más barato que la hace bien. El contrato de 
 Primero define el objetivo global: qué quiere el usuario y qué significa terminado. Después parte el trabajo en lotes y escribe un contrato por lote:
 
 ```
-Entrada: <lista exacta de ítems: rutas, IDs, filas>
+Entrada: <lista exacta de ítems (rutas, IDs, filas) y cuántos son>
 Operación: <qué hacer con cada ítem, como regla>
 Salida: <formato exacto, una unidad por ítem de entrada>
 Aceptación: <chequeos verificables: conteos, formato, invariantes>
@@ -56,13 +56,17 @@ Tamaño del lote:
 
 El revisor recibe el contrato y la salida (o dónde encontrarla), nada más. No recibe el razonamiento del agente ni su autoevaluación ("listo, procesé todo"), porque lo sesgan.
 
+El contrato le llega textual. Guarda cada contrato en un archivo y pásales la misma ruta al agente y al revisor. Un resumen puede borrar justo la frase que causó la falla, y entonces el revisor juzga contra un contrato que el agente nunca recibió.
+
+Diagnosticar la causa de una falla le toca al revisor, porque es quien tiene el contrato y la salida frente a frente. Tú solo confirmas lo que diagnostica.
+
 Revisa en dos capas, primero la barata:
 1. **Primera vista (mecánica).** Correspondencia uno a uno entre entrada y salida, conteos, formato y PENDIENTES. Hazla tú o con un script. Casi no cuesta y atrapa lo grueso: ítems omitidos, salidas truncadas o ítems inventados.
 2. **Juicio.** Solo sobre lo que marcó la primera vista, más una muestra del resto siempre que el contenido no se pueda validar con un script. Eso pasa casi siempre que la salida la produjo un modelo, porque una respuesta genérica tiene el formato correcto y pasa cualquier conteo. Aquí entra el agente `revisor`.
 
 El modelo del revisor depende de lo que tiene que juzgar, no del nivel de quien produjo:
 - Los conteos y el formato los revisa un script.
-- Para ver si una regla mecánica se aplicó bien, basta `revisor` con su modelo por defecto (sonnet).
+- Para ver si una regla mecánica se aplicó bien, basta `revisor` con su modelo por defecto (Sonnet 4.6). Si le pasas `model: sonnet`, corre en Sonnet 5.
 - Para juzgar decisiones, usa `revisor` con `model` de al menos el nivel que la tarea necesitaba. Un revisor más débil que el juicio que evalúa da falsos positivos y deja pasar lo sutil.
 
 Señales de esfuerzo incoherente:
@@ -74,7 +78,7 @@ Brief para el revisor:
 ```
 Revisa estos lotes como caja negra. Solo tienes el contrato y la salida.
 
-Contrato: <el contrato del lote, textual>
+Contrato: <ruta del archivo con el contrato, el mismo que recibió el agente>
 Salida: <dónde está o el texto>
 Qué revisar: <todos los lotes | los marcados en la primera vista: ... | una muestra de N>
 
@@ -82,6 +86,8 @@ Para cada lote revisado responde:
 - COHERENTE o INCOHERENTE respecto del contrato y del esfuerzo esperado.
 - Si es INCOHERENTE: el ítem, qué pedía el contrato, qué llegó y la causa probable
   (contrato ambiguo, lote demasiado grande, nivel insuficiente o ruido).
+- Antes de atribuir una falla a nivel insuficiente, revisa si el contrato dejaba
+  margen para ese error. Si lo dejaba, la causa es contrato ambiguo: cita la frase.
 
 Verifica contra los archivos o datos reales en vez de opinar. No edites nada.
 No incluyas comentarios de estilo ni sugerencias sin un ítem que falle.
