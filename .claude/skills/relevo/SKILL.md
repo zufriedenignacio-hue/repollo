@@ -1,101 +1,122 @@
 ---
 name: relevo
-description: Trabajo en cadena con agentes. Uno produce, un agente nuevo revisa lo que produjo el anterior, se corrige lo bloqueante y se cierra con un tope de dos rondas. El esfuerzo se calibra al tamaño y al riesgo de la tarea. Úsala siempre que el usuario pida agentes o subagentes, que otro agente revise el trabajo, una segunda mirada o un doble chequeo, o cuando invoque /relevo. Úsala también por defecto en tareas sustanciales aunque no mencione agentes, como cambios de código en varios archivos, features, investigaciones con varias fuentes, documentos o análisis que otros van a usar, o crear y editar skills. No la uses para preguntas puntuales, cambios de una línea ni conversación, ni cuando la tarea en sí es revisar algo ya hecho, como un PR. En inglés, agent pipeline, subagents, reviewer agent, review loop, second pass.
+description: Reparte trabajo entre agentes eligiendo modelo y esfuerzo por lote, y revisa cada lote como caja negra contra un contrato explícito (entrada exacta, operación y salida esperada). Decide cuándo basta un script, cuándo conviene partir el trabajo en lotes chicos para modelos baratos en paralelo (bulldozers), cuándo usar el modelo insignia con esfuerzo máximo sin auditoría, qué modelo revisa y qué hacer con un lote que no cuadra (desglosarlo, subir de nivel o corregir el contrato). Úsala siempre que el usuario pida agentes o subagentes, repartir o paralelizar trabajo, elegir modelo o esfuerzo (haiku, sonnet, opus, fable), revisar el output de otro agente, o cuando invoque /relevo. Úsala también por defecto en tareas grandes y divisibles, como muchos archivos, carpetas o registros, procesamiento por lotes, migraciones o clasificaciones masivas. No la uses para preguntas puntuales, cambios chicos ni conversación.
 ---
 
 # Relevo
 
-Trabajo en cadena con agentes. Uno produce y otro, nuevo, revisa lo que produjo el anterior. Se corrige lo que de verdad importa y se cierra. La revisión vale porque el revisor no carga los supuestos del productor. Cada ronda extra vale menos que la anterior, por eso hay tope. El esfuerzo se ajusta a la tarea.
+Cada pieza de trabajo va al modelo más barato que la hace bien. El contrato de cada pieza es tan específico que quien la revisa puede tratar al agente como caja negra: ve solo la entrada y la salida, y responde una pregunta: **¿lo que entregó es coherente con lo que se le pidió y con el esfuerzo que se le asignó?** Si el contrato no permite responder eso, la falla está en la delegación, no en el modelo.
 
-## 1. Calibra el nivel
+## 1. Fija el objetivo y escribe los contratos
 
-Decide el nivel antes de lanzar nada y dilo en una línea, por ejemplo "Nivel normal: produzco yo, revisa un agente". Así el usuario puede cambiar el rumbo temprano. Si el usuario fija el nivel ("ligero", "a fondo"), se usa ese.
+Primero define el objetivo global: qué quiere el usuario y qué significa terminado. Después parte el trabajo en lotes y escribe un contrato por lote:
 
-| Nivel | Cuándo | Cadena | Re-revisión |
+```
+Entrada: <lista exacta de ítems: rutas, IDs, filas>
+Operación: <qué hacer con cada ítem, como regla>
+Salida: <formato exacto, una unidad por ítem de entrada>
+Aceptación: <chequeos verificables: conteos, formato, invariantes>
+Esfuerzo esperado: <mecánico | juicio acotado | juicio abierto> y qué implica
+Si un ítem no calza con la regla: márcalo PENDIENTE con el motivo. No adivines.
+```
+
+Un contrato sirve si alguien que ve solo el contrato y la salida puede decir COHERENTE o INCOHERENTE sin preguntar nada. "Revisa todo este archivo" no sirve, porque no tiene lista, ni forma esperada, ni nada contra qué comparar.
+
+El esfuerzo esperado va escrito porque es lo que el revisor contrasta. Una tarea mecánica entregada con interpretaciones propias es tan incoherente como una tarea de juicio entregada con respuestas genéricas.
+
+## 2. Asigna el nivel y el tamaño del lote
+
+| Nivel | Cómo se lanza | Sirve para | Lote |
 |---|---|---|---|
-| Directo | Pregunta puntual, cambio de una línea o dato que se verifica al instante | Sin agentes | No |
-| Ligero | Tarea acotada y de bajo riesgo, como un archivo, un borrador o una búsqueda | Producción y 1 revisor | No, se corrige y se cierra |
-| Normal | Feature, documento para otros o investigación con varias fuentes | Producción, 1 revisor y corrección | Solo del delta, si hubo bloqueantes no triviales |
-| Fuerte | Error caro o irreversible (producción, dinero, datos, legal) o muchas piezas | Producción (en paralelo si se puede), 2 revisores con focos distintos y corrección | Solo del delta, si hubo bloqueantes no triviales |
+| Script | Bash, sin modelo | Reglas 100% deterministas: mover, renombrar, contar, validar formato | Todo de una vez |
+| Bulldozer | `bulldozer` (haiku) | Trabajo mecánico que exige leer: extraer, clasificar con una regla explícita, resumir un archivo | Chico |
+| Operario | `operario` (sonnet, esfuerzo medio) | Juicio acotado: aplicar un patrón con variaciones, criterios difusos | Mediano |
+| Insignia | `insignia` (fable, esfuerzo máximo) | Problemas ambiguos o globales que no se pueden partir sin perder contexto | Entero |
 
-Si dudas entre dos niveles, elige el menor. Sube de nivel solo con evidencia. Si la revisión encuentra bloqueantes en varias partes, la tarea era más grande de lo que parecía. Aplica el nivel nuevo a lo que falta, sin reiniciar la revisión ni pasarte del tope.
+Cada definición fija el esfuerzo y trae un modelo por defecto. El parámetro `model` de la llamada cambia el modelo sin tocar el esfuerzo. Por ejemplo, `operario` con `model: opus` es opus con esfuerzo medio, y `bulldozer` con `model: sonnet` es sonnet con esfuerzo bajo. Haiku no tiene niveles de esfuerzo, así que su única palanca es el tamaño del lote.
 
-Si la tarea en sí es revisar algo (un PR, un documento ajeno), esa revisión es la producción. No le pongas otro revisor encima salvo en nivel Fuerte.
+Costo relativo por token (precios de API de 2026, con haiku = 1): sonnet ≈ 2, opus ≈ 4 a 5, fable ≈ 10.
 
-En todos los niveles hay un tope de dos rondas de revisión: la inicial y una del delta.
+Cómo elegir:
+- **Parte por el nivel más barato cuyos errores el contrato permite detectar.** Si la revisión no ve el error, el ahorro es ilusorio.
+- **Usa el insignia con esfuerzo máximo** cuando revisar costaría tanto como hacer, o cuando la tarea necesita ver todo junto. En ese caso omite la revisión con modelo y deja solo los chequeos mecánicos, que casi no cuestan.
+- **Cuenta el costo por tarea terminada, no por llamada.** Un lote barato que hay que rehacer dos veces no es barato. Antes de armar una cadena de modelos, evalúa si un solo modelo fuerte con menos esfuerzo lo resuelve de forma más simple.
+- **Si una pieza es chica y ya la tienes en contexto, hazla tú.** Escribir el contrato cuesta más que hacerla.
 
-## 2. Produce
+Tamaño del lote:
+- **Fija el tamaño del lote y deriva la cantidad de agentes.** Con lotes de 4 carpetas, un nivel de 20 carpetas son 5 bulldozers, uno de 40 son 10 y uno de 120 son 30. La carga por agente se mantiene; lo que crece es la cantidad de agentes.
+- **El techo lo pone la revisión.** Un lote no puede ser más grande de lo que un revisor alcanza a comparar, entrada contra salida, de un vistazo. Lo que el modelo "aguanta" no es el límite.
+- **El piso lo pone el arranque.** Cada agente parte de cero y carga decenas de miles de tokens de contexto propio antes de trabajar. Arrancar un agente, sin trabajo, cuesta del orden de US$0,07 con sonnet y US$0,30 con fable (medido en Claude Code 2.1.282, a precios de API). Si el lote es tan chico que el arranque pesa más que el trabajo, junta lotes o usa un script.
+- **Lanza un lote piloto.** Antes de lanzar 30 lotes, lanza 1 y revísalo. Si sale bien, lanza el resto con el mismo contrato. Si sale mal, corrige el contrato o el nivel antes de multiplicar el error por 30.
+- **Trabaja por oleadas cuando hay dependencias.** Si el paso siguiente necesita el resultado del anterior (abrir un nivel para llegar al siguiente), termina y revisa cada oleada antes de lanzar la otra. Dentro de una oleada, los lotes van en paralelo en un mismo mensaje. Si lo que sigue depende de la oleada, lánzala en primer plano (`run_in_background: false`).
+- **Dos agentes en paralelo no pueden tocar los mismos archivos.** Reparte los lotes por archivo o carpeta.
 
-**Quién produce.** Si ya tienes el contexto y la pieza es chica, produce tú, porque escribir un brief para un agente cuesta más que hacerlo. Delega la producción cuando:
-- hay partes independientes que pueden correr en paralelo (lánzalas en un mismo mensaje);
-- hay que revisar mucho código o muchas fuentes (usa `Explore` para encontrar, no para auditar);
-- el trabajo es largo y llenaría tu contexto de detalles que después no necesitas.
+## 3. Revisa como caja negra
 
-No pongas en paralelo a dos productores que tocarían los mismos archivos. Divide por archivo o trabaja en serie.
+El revisor recibe el contrato y la salida (o dónde encontrarla), nada más. No recibe el razonamiento del agente ni su autoevaluación ("listo, procesé todo"), porque lo sesgan.
 
-**El brief.** Los agentes parten sin contexto y no ven esta conversación, así que una referencia a "lo de arriba" no les sirve. Cada brief lleva:
-- el objetivo y para qué sirve (el porqué cambia las decisiones del agente);
-- el contexto concreto: rutas, datos y decisiones que el usuario ya tomó y que no se discuten;
-- las restricciones y lo que no debe hacer;
-- qué significa terminado;
-- un formato de retorno corto: qué hizo, dónde (rutas), qué verificó y cómo, y qué quedó dudoso.
+Revisa en dos capas, primero la barata:
+1. **Primera vista (mecánica).** Correspondencia uno a uno entre entrada y salida, conteos, formato y PENDIENTES. Hazla tú o con un script. Casi no cuesta y atrapa lo grueso: ítems omitidos, salidas truncadas o ítems inventados.
+2. **Juicio.** Solo sobre lo que marcó la primera vista, más una muestra del resto cuando el contrato pedía juicio. Aquí entra el agente `revisor`.
 
-Si el paso siguiente depende de este output, lanza el agente en primer plano (`run_in_background: false`). Usa segundo plano solo si tienes otra cosa útil que hacer mientras.
+El modelo del revisor depende de lo que tiene que juzgar, no del nivel de quien produjo:
+- Los conteos y el formato los revisa un script.
+- Para ver si una regla mecánica se aplicó bien, basta `revisor` con su modelo por defecto (sonnet).
+- Para juzgar decisiones, usa `revisor` con `model` de al menos el nivel que la tarea necesitaba. Un revisor más débil que el juicio que evalúa da falsos positivos y deja pasar lo sutil.
 
-## 3. Revisa
+Señales de esfuerzo incoherente:
+- Por debajo de lo pedido: ítems omitidos, respuestas genéricas que no dependen del ítem, PENDIENTES sin motivo, salida truncada o calidad que cae hacia el final del lote.
+- Fuera del contrato: cambios no pedidos, interpretaciones propias de una regla explícita o ítems inventados.
 
-El revisor es siempre un agente nuevo. Nunca revisa el productor su propio trabajo, ni tú si fuiste el productor, porque la idea es que no comparta tus supuestos. No le bajes el modelo al revisor (deja el que hereda). Un revisor más débil que el productor da falsos positivos y deja pasar lo sutil. Los modelos livianos sirven para búsquedas mecánicas, no para revisar.
-
-Pásale el objetivo original (en lo posible con las palabras del usuario), el output o dónde encontrarlo (rutas, diff, rama) y los criterios de terminado. No le pases la autoevaluación del productor ("todo funciona", "está completo"), porque lo sesga.
-
-En nivel Fuerte, lanza dos revisores en paralelo con focos distintos según la tarea. Por ejemplo, correctitud y seguridad, datos y conclusiones, o fondo y forma en un documento externo.
-
-Plantilla de brief para el revisor:
+Brief para el revisor:
 
 ```
-Revisa el siguiente trabajo. No lo hiciste tú, así que no asumas que está bien.
+Revisa estos lotes como caja negra. Solo tienes el contrato y la salida.
 
-Objetivo original: <lo que pidió el usuario, textual si se puede>
-Qué se produjo y dónde: <rutas / diff / rama / texto>
-Terminado significa: <criterios>
+Contrato: <el contrato del lote, textual>
+Salida: <dónde está o el texto>
+Qué revisar: <todos los lotes | los marcados en la primera vista: ... | una muestra de N>
 
-Verifica en vez de opinar: corre los tests o el código, abre los archivos y
-contrasta cada afirmación con su fuente. Si algo no se puede verificar, dilo.
-No edites nada, solo reporta.
+Para cada lote revisado responde:
+- COHERENTE o INCOHERENTE respecto del contrato y del esfuerzo esperado.
+- Si es INCOHERENTE: el ítem, qué pedía el contrato, qué llegó y la causa probable
+  (contrato ambiguo, lote demasiado grande, nivel insuficiente o ruido).
 
-Para cada hallazgo indica:
-- si es BLOQUEANTE o MENOR. Bloqueante: incumple el objetivo, es falso, rompe
-  algo o falla en un caso realista. Menor: mejora real que no impide usarlo.
-- qué falla, en qué caso concreto y la evidencia (línea, salida o cita).
-
-No incluyas gustos de estilo, sugerencias de mejora sin un caso que falle,
-reescrituras completas ni recomendaciones que nadie va a implementar.
-
-Termina con APROBADO o CORREGIR y una línea sobre lo que verificaste de verdad.
+Verifica contra los archivos o datos reales en vez de opinar. No edites nada.
+No incluyas comentarios de estilo ni sugerencias sin un ítem que falle.
 ```
 
-## 4. Corrige y cierra
+## 4. Decide qué hacer con lo que no cuadra
 
-1. **Filtra.** El revisor también se equivoca. Confirma cada bloqueante antes de actuar (lee la línea o reproduce el caso). Descarta los que no se sostienen y anota por qué.
-2. **Corrige los bloqueantes.** Si el cambio es chico, hazlo tú. Si es grande y lo produjo un agente, retómalo con `SendMessage`, que conserva su contexto, en vez de lanzar uno nuevo que parta de cero.
-3. **Menores.** Aplica de paso los que sean triviales y deja el resto en el reporte. Nunca provocan otra ronda.
-4. **Re-revisión, si el nivel la permite.** Hazla solo si hubo bloqueantes y la corrección no fue trivial. Retoma con `SendMessage` al revisor que levantó los bloqueantes (en Fuerte, a cada uno que haya levantado alguno) y pídele que revise solo el delta: si se resolvieron los bloqueantes y si la corrección rompió algo. No le pidas revisar todo el trabajo de nuevo. Un revisor nuevo sobre el trabajo completo siempre encuentra algo más y el ciclo no termina.
-5. **Para.** Después de la segunda ronda no hay más revisiones. Si la última confirmó un error con un arreglo puntual, aplícalo y verifícalo tú (corre el test o reproduce el caso). Lo que siga abierto se reporta tal cual junto con lo que se intentó, porque seguir iterando casi nunca converge. Para también apenas una ronda traiga solo hallazgos menores.
+El revisor también se equivoca, así que confirma cada hallazgo mirando el ítem antes de actuar. Después actúa según el patrón:
+
+| Señal | Causa probable | Acción |
+|---|---|---|
+| Varios lotes fallan igual | Contrato ambiguo | Corrige el contrato y relanza esos lotes. No subas de nivel. |
+| Ítems omitidos, salida truncada o calidad que cae al final | Lote demasiado grande | Desglosa ese lote en lotes más chicos, con el mismo nivel. |
+| Decisiones equivocadas con un contrato claro | Nivel insuficiente | Relanza el lote un nivel más arriba o con más esfuerzo. |
+| Falla un lote aislado y el resto sale bien | Ruido | Rehazlo una vez, igual. |
+
+Cada lote tiene como máximo un reintento: rehacerlo, desglosarlo o subirlo de nivel. Si vuelve a fallar, lo resuelves tú o el insignia, o queda abierto en el reporte. No iteres en círculo.
 
 ## 5. Reporta
 
-Escríbele corto al usuario y en su idioma. El usuario no ve los reportes de los agentes, así que transmite solo lo que importa:
-- qué se hizo y dónde (rutas, rama o link);
-- qué encontró la revisión y qué se corrigió, con una línea por hallazgo relevante;
-- qué quedó abierto y por qué.
+Escribe corto y en el idioma del usuario:
+- El plan ejecutado: cuántos lotes, qué nivel tuvo cada grupo y quién revisó, en una línea o una tabla chica.
+- Lo que no cuadró y qué hiciste: desglose, subida de nivel o contrato corregido.
+- Lo que quedó abierto.
 
-No narres cada paso, no pegues los reportes completos y no cierres con ofertas genéricas.
+No narres agente por agente ni pegues sus reportes.
 
-## Errores frecuentes
+## Agentes
 
-- Usar agentes para lo trivial. Si se resuelve en un paso, es nivel Directo.
-- Aceptar el veredicto de un revisor que aprueba sin mostrar qué verificó. Pídele la evidencia.
-- Dejar que el revisor reescriba por gusto. Solo cuentan los hallazgos con un caso que falle.
-- Revisar todo en cada ronda en vez de solo el delta.
-- Iterar por hallazgos menores.
-- Tratar los hallazgos del revisor como órdenes sin confirmarlos.
+Los niveles son definiciones de agente porque, en Claude Code, el esfuerzo de un subagente solo se fija en su definición. El parámetro `model` de la llamada cambia el modelo, no el esfuerzo. Las definiciones (`bulldozer`, `operario`, `insignia` y `revisor`) están en la carpeta `agents/` de esta skill. Para que la herramienta Agent las liste, tienen que estar en `~/.claude/agents/` o en `.claude/agents/` del proyecto, y se cargan al iniciar la sesión. Si no aparecen, ofrécele al usuario copiarlas desde la carpeta `agents/` de esta skill a `~/.claude/agents/`; quedan activas desde la sesión siguiente. Mientras tanto, usa `general-purpose` con el parámetro `model` (el esfuerzo queda en el valor por defecto) y agrega al brief del revisor las reglas de `agents/revisor.md`.
+
+## Ejemplo
+
+Hay un árbol de carpetas por niveles: hay que procesar un nivel para llegar al siguiente, y cada nivel tiene más carpetas que el anterior.
+- Si procesar una carpeta es una regla fija (mover o renombrar), el nivel es Script y no hacen falta agentes.
+- Si hay que leer y decidir con una regla explícita, van bulldozers por oleadas, una por nivel, con lotes de 4 carpetas: 5 bulldozers para el nivel de 20 carpetas y 30 para el de 120. La primera oleada parte con un lote piloto.
+- Contrato de un lote: "Entrada: estas 4 rutas. Operación: … Salida: una fila por carpeta con ruta|decisión|motivo. Aceptación: 4 filas con rutas idénticas a la entrada."
+- La primera vista (conteos y rutas) la hace un script sobre todos los lotes. El `revisor` mira solo los lotes marcados y una muestra del resto.
+- La alternativa es un insignia con esfuerzo máximo que recorre todo el árbol. Es más lento y más caro por token, pero no necesita revisión con modelo. Conviene cuando las decisiones dependen de ver varias carpetas a la vez, que es justo lo que un bulldozer no ve.

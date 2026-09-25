@@ -1,0 +1,1 @@
+../skills/relevo/agents/operario.md
